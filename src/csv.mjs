@@ -1,0 +1,237 @@
+/**
+ * Decoding, sanitising and delimited parsing for one query/page export.
+ *
+ * Nothing in this module touches the filesystem, the clock, the locale or the
+ * network. It turns bytes into records, or it says precisely why it could not.
+ * An export is untrusted data: every value that leaves here has had its
+ * control characters removed, because a query string containing a newline
+ * would otherwise forge lines in the human-readable report.
+ */
+
+/**
+ * Order by UTF-16 code unit.
+ *
+ * `localeCompare` depends on ICU data that varies between Node builds and
+ * treats punctuation as ignorable, which produced a real ordering difference
+ * elsewhere in this catalog. Every sort in this tool routes through here.
+ */
+export function byCodeUnit(left, right) {
+  if (left === right) return 0
+  return left < right ? -1 : 1
+}
+
+/**
+ * Characters removed before any export value is embedded in a report or map.
+ * Built from code points rather than written literally, because a literal
+ * U+2028 inside a regular expression literal is a syntax error in a module.
+ */
+const CONTROL = new RegExp(
+  `[${String.fromCharCode(0)}-${String.fromCharCode(8)}` +
+  `${String.fromCharCode(11)}${String.fromCharCode(12)}` +
+  `${String.fromCharCode(14)}-${String.fromCharCode(31)}` +
+  `${String.fromCharCode(127)}${String.fromCharCode(0x2028)}${String.fromCharCode(0x2029)}]`,
+  'g',
+)
+
+const BOM = String.fromCharCode(0xfeff)
+
+/**
+ * Flatten an untrusted string to a single safe line.
+ *
+ * Applied to every identifier, path, column name, query and page URL that
+ * reaches the report or the map -- not only to evidence excerpts. A tool in
+ * this catalog sanitised its evidence field and not its ids, and an id
+ * carrying a newline forged extra lines in its human report.
+ */
+export function sanitize(value) {
+  return String(value).replace(CONTROL, ' ').replace(/\s+/g, ' ').trim()
+}
+
+export const EXCERPT_LIMIT = 200
+
+/** A bounded, single-line excerpt. Export content is data, never an instruction. */
+export function excerpt(value, limit = EXCERPT_LIMIT) {
+  const flattened = sanitize(value)
+  if (flattened.length <= limit) return flattened
+  return `${flattened.slice(0, limit)}...`
+}
+
+/**
+ * Decode bytes as UTF-8, strictly.
+ *
+ * `fatal: true` is the entire point. Decoding leniently and then looking for
+ * U+FFFD in the result cannot distinguish undecodable bytes from a file that
+ * legitimately contains a replacement character, and that confusion has let an
+ * unreadable input report a pass. The decoder decides; the decoded text never
+ * gets a vote. Every byte source in this tool -- exports and the configuration
+ * file alike -- goes through this function.
+ */
+export function decodeUtf8(bytes) {
+  try {
+    return { ok: true, text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes) }
+  } catch {
+    return { ok: false, reason: 'not-utf8' }
+  }
+}
+
+export function stripBom(text) {
+  return text.startsWith(BOM) ? text.slice(1) : text
+}
+
+/** Tab-separated exports are common enough to detect from the extension. */
+export function delimiterFor(filename) {
+  return filename.toLowerCase().endsWith('.tsv') ? '\t' : ','
+}
+
+/** Column names are matched after sanitising, folding case and collapsing runs of spaces. */
+export function normalizeColumnName(name) {
+  return sanitize(name).toLowerCase()
+}
+
+const COUNT_PATTERN = /^\d{1,12}$/
+const POSITION_PATTERN = /^\d{1,9}(\.\d{1,6})?$/
+
+/**
+ * Parse an impression or click count.
+ *
+ * Only an unadorned non-negative integer is accepted. A thousands separator,
+ * a percentage sign or a float is refused rather than coerced: guessing what
+ * "1,200" meant is how an export silently turns into different numbers.
+ */
+export function parseCount(raw) {
+  const value = String(raw).trim()
+  return COUNT_PATTERN.test(value) ? Number(value) : null
+}
+
+/** Average position. Empty means "not reported", which is not the same as invalid. */
+export function parsePosition(raw) {
+  const value = String(raw).trim()
+  if (value === '') return { ok: true, value: null }
+  if (!POSITION_PATTERN.test(value)) return { ok: false, value: null }
+  return { ok: true, value: Number(value) }
+}
+
+/**
+ * Parse delimited text into records.
+ *
+ * A hand-written state machine rather than a split on the delimiter: a query
+ * containing a comma inside quotes is ordinary in a search export, and
+ * splitting would shift every later column by one and quietly produce wrong
+ * numbers. Quoting follows RFC 4180 -- a field is quoted only when the quote
+ * is its first character, and a doubled quote inside a quoted field is one
+ * literal quote.
+ *
+ * Two bounds are enforced here rather than after the fact, so an oversized
+ * export is never fully materialised: `maxRecords` stops the scan and
+ * `maxFieldChars` marks the offending record. Both are reported by the caller
+ * as findings; neither is a silent truncation.
+ */
+export function parseDelimited(text, { delimiter, maxRecords, maxFieldChars }) {
+  if (typeof delimiter !== 'string' || delimiter.length !== 1) {
+    throw new TypeError('Delimiter must be a single character')
+  }
+  if (!Number.isInteger(maxRecords) || maxRecords < 1) throw new TypeError('maxRecords must be a positive integer')
+  if (!Number.isInteger(maxFieldChars) || maxFieldChars < 1) {
+    throw new TypeError('maxFieldChars must be a positive integer')
+  }
+
+  const records = []
+  const overlong = new Set()
+  let unterminatedQuote = false
+  let exceeded = false
+
+  let fields = []
+  let field = ''
+  let inQuotes = false
+  let fieldStarted = false
+  let recordStarted = false
+  let line = 1
+  let recordLine = 1
+
+  const endField = () => {
+    if (field.length > maxFieldChars) {
+      overlong.add(recordLine)
+      field = field.slice(0, maxFieldChars)
+    }
+    fields.push(field)
+    field = ''
+    fieldStarted = false
+  }
+
+  const endRecord = () => {
+    if (!recordStarted && fields.length === 0 && field === '') return true
+    endField()
+    if (records.length >= maxRecords) {
+      exceeded = true
+      return false
+    }
+    records.push({ line: recordLine, fields })
+    fields = []
+    recordStarted = false
+    return true
+  }
+
+  let index = 0
+  while (index < text.length) {
+    const character = text[index]
+
+    if (inQuotes) {
+      if (character === '"') {
+        if (text[index + 1] === '"') {
+          field += '"'
+          index += 2
+          continue
+        }
+        inQuotes = false
+        index += 1
+        continue
+      }
+      if (character === '\n') line += 1
+      field += character
+      index += 1
+      continue
+    }
+
+    if (character === '"' && !fieldStarted) {
+      inQuotes = true
+      fieldStarted = true
+      recordStarted = true
+      index += 1
+      continue
+    }
+    if (character === delimiter) {
+      endField()
+      recordStarted = true
+      index += 1
+      continue
+    }
+    if (character === '\r' || character === '\n') {
+      const width = character === '\r' && text[index + 1] === '\n' ? 2 : 1
+      if (!endRecord()) break
+      line += 1
+      recordLine = line
+      index += width
+      continue
+    }
+
+    field += character
+    fieldStarted = true
+    recordStarted = true
+    index += 1
+  }
+
+  if (!exceeded) {
+    if (inQuotes) {
+      unterminatedQuote = true
+      recordStarted = true
+    }
+    endRecord()
+  }
+
+  return {
+    records,
+    exceeded,
+    unterminatedQuote,
+    overlongRecordLines: [...overlong].sort((left, right) => left - right),
+  }
+}
