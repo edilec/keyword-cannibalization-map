@@ -377,10 +377,22 @@ export async function loadConfigFile(path) {
  * defeats a symlinked parent directory, which is the way a "separate
  * destination" quietly becomes a file written into the export set.
  */
-export async function resolveMapDestination(rootReal, destination) {
+export async function resolveMapDestination(root, destination) {
   if (typeof destination !== 'string' || destination.trim() === '') {
     throw new TypeError('Map destination must be a non-empty path')
   }
+
+  // The root is resolved here rather than trusted from the caller. Comparing a
+  // real destination against an unresolved root is the mistake that lets a
+  // write land inside the export set, and it is invisible on any system where
+  // the temporary or home directory is itself a symbolic link.
+  let rootReal
+  try {
+    rootReal = await realpath(root)
+  } catch (error) {
+    throw new TypeError(`Export root could not be resolved: ${error.code ?? 'unknown error'}`)
+  }
+
   const absolute = resolve(destination)
   const tail = []
   let probe = absolute
@@ -438,9 +450,21 @@ function record(collector, row) {
   })
 }
 
+/**
+ * The only place a severity is chosen.
+ *
+ * An unknown rule id throws rather than defaulting, because a default would let
+ * a new rule ship at whatever severity happened to be convenient and a renamed
+ * one disappear from the failing set without a word.
+ */
+export function severityFor(ruleId) {
+  const severity = RULE_SEVERITY[ruleId]
+  if (severity === undefined) throw new Error(`No severity is defined for rule "${sanitize(String(ruleId))}"`)
+  return severity
+}
+
 function createFinding(row) {
-  const severity = RULE_SEVERITY[row.ruleId]
-  if (severity === undefined) throw new Error(`No severity is defined for rule "${sanitize(row.ruleId)}"`)
+  const severity = severityFor(row.ruleId)
   const finding = {
     ruleId: row.ruleId,
     severity,
@@ -559,8 +583,7 @@ async function collectExportFiles(rootReal, limits, collector) {
         record(collector, {
           ...ROOT_LOCATION,
           ruleId: 'too-many-exports',
-          message: `The export set exceeded the maxExports limit of ${limits.maxExports}; the remaining files were not read.`,
-          evidence: `first unread export: ${childRelative}`,
+          message: `The export set exceeded the maxExports limit of ${limits.maxExports}; ${childRelative} and every later file were not read.`,
           suggestion: 'Raise --max-exports or split the export set into separate runs.',
         })
         collector.incomplete = true
@@ -720,6 +743,21 @@ async function loadExport(collector, limits, settings, entry) {
   }
 
   const [header, ...dataRecords] = parsed.records
+  const overlong = new Set(parsed.overlongRecordLines)
+
+  if (overlong.has(header.line)) {
+    record(collector, {
+      file: relativePath,
+      pointer: '/header',
+      line: header.line,
+      ruleId: 'row-field-too-long',
+      message: `A column name is longer than the maxFieldChars limit of ${limits.maxFieldChars}; truncating it would resolve the wrong columns, so the file was not read.`,
+      suggestion: 'Raise --max-field-chars.',
+    })
+    collector.incomplete = true
+    return unread
+  }
+
   const indexes = resolveHeader(collector, relativePath, header.fields, settings.columns, settings.segmentColumns)
   if (indexes === null) {
     collector.incomplete = true
@@ -735,7 +773,6 @@ async function loadExport(collector, limits, settings, entry) {
     return { rows: [], read: true }
   }
 
-  const overlong = new Set(parsed.overlongRecordLines)
   const rows = []
   const seen = new Map()
 
@@ -750,6 +787,9 @@ async function loadExport(collector, limits, settings, entry) {
         message: `A field on this row is longer than the maxFieldChars limit of ${limits.maxFieldChars}; the row was not used.`,
         suggestion: 'Raise --max-field-chars, or check the export for a malformed quote.',
       })
+      // Unlike an inconsistent row, this row was refused by a limit of ours
+      // rather than found to be wrong. The evidence is missing, not invalid.
+      collector.incomplete = true
       continue
     }
     if (item.fields.length !== header.fields.length) {
