@@ -414,11 +414,12 @@ test('every untrusted string reaching output is flattened to one line', async ()
   const NEWLINE = String.fromCharCode(10)
   const forgedQuery = `solar${NEWLINE}ERROR   forged query line`
   const forgedPage = `/one${NEWLINE}ERROR   forged page line`
+  const forgedRegion = `US${NEWLINE}ERROR   forged region line`
   const forgedName = `we${NEWLINE}ird.csv`
   const rows = [
     HEADER,
-    `"${forgedQuery}","${forgedPage}",US,en-US,600,10,3.0`,
-    `"${forgedQuery}",/two,US,en-US,400,10,4.0`,
+    `"${forgedQuery}","${forgedPage}","${forgedRegion}",en-US,600,10,3.0`,
+    `"${forgedQuery}",/two,"${forgedRegion}",en-US,400,10,4.0`,
     '',
   ].join(NEWLINE)
 
@@ -451,7 +452,17 @@ test('every untrusted string reaching output is flattened to one line', async ()
     for (const query of candidate.queries) assert.equal(query.includes(NEWLINE), false)
     for (const page of candidate.pages) assert.equal(page.page.includes(NEWLINE), false)
     assert.equal(candidate.intent.includes(NEWLINE), false)
+
+    // The segment label and its values are built from export content too.
     assert.equal(candidate.segmentLabel.includes(NEWLINE), false)
+    for (const value of Object.values(candidate.segment)) assert.equal(value.includes(NEWLINE), false)
+    for (const segment of map.segments) {
+      assert.equal(segment.label.includes(NEWLINE), false)
+      for (const value of Object.values(segment.segment)) assert.equal(value.includes(NEWLINE), false)
+    }
+    for (const row of candidate.rows) {
+      for (const value of Object.values(row.segment)) assert.equal(value.includes(NEWLINE), false)
+    }
 
     // The end-to-end property: the human report has exactly one line per
     // finding plus its three summary lines. A forged line would add one.

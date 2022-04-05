@@ -129,6 +129,33 @@ test('nothing in the shipped source consults a locale, a clock or a random sourc
   }
 })
 
+test('the export walk sorts its entries before it visits them', async () => {
+  // Filesystem enumeration order is not a contract, and on this machine it
+  // happens to match code-unit order -- so no fixture can observe the missing
+  // sort here. The guarantee is that the walk does not depend on that luck, and
+  // this assertion is what fails if the sort is deleted.
+  const source = await readFile(resolve(projectDirectory, 'src/index.mjs'), 'utf8')
+  assert.match(source, /entries\.sort\(\(left, right\) => byCodeUnit\(left\.name, right\.name\)\)/)
+})
+
+test('which export is read when maxExports bites does not depend on creation order', async () => {
+  // Written z first, a second. The bounded run must read a.csv and name z.csv
+  // as the file it did not read.
+  const directory = await mkdtemp(join(tmpdir(), 'kcm-order-'))
+  try {
+    await writeFile(join(directory, 'z-later.csv'), [HEADER, 'zed q,/z,US,en-US,900,10,3.0', ''].join('\n'), 'utf8')
+    await writeFile(join(directory, 'a-earlier.csv'), [HEADER, 'ay q,/a,US,en-US,800,10,3.0', ''].join('\n'), 'utf8')
+
+    const { report } = await mapQueryPageExports({ root: directory, limits: { maxExports: 1 } })
+    const bounded = report.findings.find((finding) => finding.ruleId === 'too-many-exports')
+    assert.ok(bounded)
+    assert.ok(bounded.message.includes('z-later.csv'), 'the later-sorting file is the one left unread')
+    assert.equal(bounded.message.includes('a-earlier.csv'), false)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
 test('the tool makes no network call of any kind', async () => {
   for (const path of ['src/index.mjs', 'src/cluster.mjs', 'src/csv.mjs', 'bin/keyword-cannibalization-map.mjs']) {
     const source = await readFile(resolve(projectDirectory, path), 'utf8')
