@@ -481,6 +481,29 @@ test('every untrusted string reaching output is flattened to one line', async ()
   })
 })
 
+test('a duplicate row is reported only when the query, page and segment truly repeat', async () => {
+  // The separator-collision case: "a|b" on page "c" and "a" on page "b|c" are
+  // two different rows, and a joined key would call them one.
+  const rows = [
+    HEADER,
+    '"a|b",/c,US,en-US,600,10,3.0',
+    'a,"/b|c",US,en-US,400,10,4.0',
+    '',
+  ].join('\n')
+
+  await withRoot({ 'e.csv': rows }, async (root) => {
+    const { report } = await mapQueryPageExports({ root })
+    assert.equal(findingsFor(report, 'row-duplicate').length, 0)
+  })
+
+  const repeated = [HEADER, 'a b,/c,US,en-US,600,10,3.0', 'a b,/c,US,en-US,400,10,4.0', ''].join('\n')
+  await withRoot({ 'e.csv': repeated }, async (root) => {
+    const { report } = await mapQueryPageExports({ root })
+    assert.equal(findingsFor(report, 'row-duplicate').length, 1)
+    assert.equal(report.findings.find((item) => item.ruleId === 'row-duplicate').line, 3)
+  })
+})
+
 test('unknown options, limits, thresholds, columns and match modes are refused', async () => {
   await assert.rejects(() => mapQueryPageExports({ root: CLEAN_ROOT, roots: CLEAN_ROOT }), TypeError)
   await assert.rejects(() => mapQueryPageExports({ root: CLEAN_ROOT, limits: { maxExport: 2 } }), TypeError)

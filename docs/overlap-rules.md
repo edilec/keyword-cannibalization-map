@@ -133,6 +133,12 @@ and never a pass.
 `maxRows` counts records per export including the header. The configuration file
 is separately bounded at 65536 bytes before it is read.
 
+There is deliberately **no wall-clock timeout**. Every phase is bounded by the
+counts above and by nothing else: there is no network call, no subprocess and no
+unbounded loop, so the work is a function of input size rather than of elapsed
+time. A time limit would make the result depend on how busy the machine was,
+which is exactly the nondeterminism the rest of this document rules out.
+
 ## Configuration file
 
 `--config FILE` reads a JSON object. Unknown keys are refused rather than

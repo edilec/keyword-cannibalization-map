@@ -853,7 +853,10 @@ async function loadExport(collector, limits, settings, entry) {
       Object.fromEntries(settings.segmentColumns.map((column) => [column, item.fields[indexes[`segment:${column}`]]])),
     )
     const queryNormalized = normalizeQuery(query)
-    const key = `${segment.key}|${queryNormalized}|${page}`
+    // JSON rather than a joined string: a page value containing the separator
+    // would otherwise collide with a different query and page pair and report a
+    // duplicate that is not one.
+    const key = JSON.stringify([segment.key, queryNormalized, page])
     const first = seen.get(key)
     if (first !== undefined) {
       record(collector, {
