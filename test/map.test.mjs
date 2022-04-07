@@ -357,6 +357,38 @@ test('a candidate with more rows than maxClusterRows says so instead of trimming
   })
 })
 
+test('no export is skipped for its name, whatever the directory is called', async () => {
+  // Both skips were real and both were invisible: a dot-prefixed export and one
+  // under node_modules were never opened, never counted in exportsFound and
+  // never reported, so a run that read one of three exports said pass. This
+  // fixture is what fails when either skip returns.
+  const rows = (query) =>
+    [HEADER, `${query},/one,US,en-US,600,10,3.0`, `${query},/two,US,en-US,400,10,4.0`, ''].join('\n')
+
+  await withRoot(
+    {
+      'plain.csv': rows('plain q'),
+      '.hidden-export.csv': rows('hidden q'),
+      'node_modules/vendored.csv': rows('vendored q'),
+    },
+    async (root) => {
+      const { report, map } = await mapQueryPageExports({ root })
+
+      assert.equal(report.status, 'pass')
+      assert.equal(report.summary.exportsFound, 3)
+      assert.equal(report.summary.exportsRead, 3)
+      assert.equal(report.summary.rows, 6)
+
+      const files = new Set(map.candidates.flatMap((candidate) => candidate.rows.map((row) => row.file)))
+      assert.deepEqual(
+        [...files].sort(),
+        ['.hidden-export.csv', 'node_modules/vendored.csv', 'plain.csv'],
+        'every export under the root must have contributed its rows',
+      )
+    },
+  )
+})
+
 test('a symlink out of the root is refused unread', async () => {
   const outside = await mkdtemp(join(tmpdir(), 'kcm-outside-'))
   try {

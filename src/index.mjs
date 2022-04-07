@@ -181,7 +181,6 @@ export const MAP_NOTES = Object.freeze([
 ])
 
 const EXPORT_EXTENSIONS = Object.freeze(['.csv', '.tsv'])
-const SKIPPED_DIRECTORIES = Object.freeze(['node_modules'])
 const ALLOWED_OPTIONS = Object.freeze(['columns', 'limits', 'match', 'root', 'segmentColumns', 'thresholds'])
 const ALLOWED_CONFIG_KEYS = Object.freeze(['columns', 'limits', 'match', 'segmentColumns', 'thresholds'])
 const MAX_SEGMENT_COLUMNS = 4
@@ -485,6 +484,15 @@ function createFinding(row) {
  * Every entry is resolved to its real path and re-checked against the real
  * root before anything is read from it, and a real path already visited is not
  * visited twice.
+ *
+ * No entry is skipped for its name. A dot-prefixed export and a directory
+ * called `node_modules` are walked like any other, because a name-based skip
+ * drops evidence that nothing in the report accounts for: the file is not
+ * read, not counted in `exportsFound`, and not reported -- so a run that never
+ * saw two of its three exports still says `pass`. Entries that are not
+ * export-shaped stay skipped in silence, as they always were: they were never
+ * candidates. The depth and count limits, which do report themselves, are what
+ * bound the walk.
  */
 async function collectExportFiles(rootReal, limits, collector) {
   const files = []
@@ -521,7 +529,6 @@ async function collectExportFiles(rootReal, limits, collector) {
 
     for (const entry of entries) {
       if (stopped) return
-      if (entry.name.startsWith('.')) continue
       const childRelative = relativePath === '' ? entry.name : `${relativePath}/${entry.name}`
       const childAbsolute = join(absolute, entry.name)
 
@@ -557,7 +564,6 @@ async function collectExportFiles(rootReal, limits, collector) {
       visited.add(realPath)
 
       if (info.isDirectory()) {
-        if (SKIPPED_DIRECTORIES.includes(entry.name)) continue
         await walk(realPath, childRelative, depth + 1)
         continue
       }

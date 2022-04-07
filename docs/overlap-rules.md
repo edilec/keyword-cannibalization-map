@@ -22,7 +22,13 @@ inconsistent or unparseable, which is a different statement entirely.
 
 ## How rows become candidates
 
-1. Every export under `--root` is decoded as UTF-8, strictly.
+1. Every export under `--root` is decoded as UTF-8, strictly. No entry is
+   skipped for its name: a dot-prefixed export and a directory called
+   `node_modules` are walked and read like any other file, because a
+   name-based skip leaves a gap nothing in the report accounts for. Entries
+   that are not `.csv` or `.tsv` are not exports and are passed over in
+   silence; the depth and count limits, which report themselves, are what
+   bound the walk.
 2. The header is resolved to column indexes for `query`, `page`, `impressions`,
    `clicks`, the optional `position`, and each declared segment column.
 3. Each row is validated. An invalid row is reported and dropped; it never
