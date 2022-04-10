@@ -31,15 +31,61 @@ test('byCodeUnit orders by code unit, where collation would not', () => {
   )
 })
 
-test('sanitize flattens every character that could forge a report line', () => {
+/** How a consumer that respects Unicode line boundaries splits text. */
+const UNICODE_LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/
+
+/**
+ * Every class below got through a narrower version of this filter somewhere,
+ * and each is named so a failure says which one came back.
+ *
+ * C1 is the class this tool actually shipped without: a filter covering C0 and
+ * the Unicode line separators let U+0085 (NEL) through, and NEL *is* a line
+ * break to anything that splits on Unicode line boundaries -- so a value
+ * carrying one forged a line in the human report while a test counting LFs saw
+ * a report of exactly the right length.
+ */
+const CONTROL_CLASSES = [
+  ['C0 NUL', 0x00], ['C0 BEL', 0x07], ['C0 TAB', 0x09], ['C0 LF', 0x0a], ['C0 VT', 0x0b],
+  ['C0 FF', 0x0c], ['C0 CR', 0x0d], ['C0 ESC', 0x1b], ['C0 US', 0x1f],
+  ['DEL', 0x7f],
+  ['C1 PAD', 0x80], ['C1 NEL', 0x85], ['C1 CSI', 0x9b], ['C1 APC', 0x9f],
+  ['line separator', 0x2028], ['paragraph separator', 0x2029],
+  ['LRM', 0x200e], ['RLM', 0x200f],
+  ['LRE', 0x202a], ['RLE', 0x202b], ['PDF', 0x202c], ['LRO', 0x202d], ['RLO', 0x202e],
+  ['LRI', 0x2066], ['RLI', 0x2067], ['FSI', 0x2068], ['PDI', 0x2069],
+]
+
+test('sanitize removes every class of character that forges or hides output', () => {
   const forged = `first${String.fromCharCode(10)}ERROR   forged line`
   assert.equal(sanitize(forged), 'first ERROR forged line')
   assert.equal(sanitize(forged).includes(String.fromCharCode(10)), false)
 
   const separators = `a${String.fromCharCode(0x2028)}b${String.fromCharCode(0x2029)}c${String.fromCharCode(0)}d`
   assert.equal(sanitize(separators), 'a b c d')
-  for (const code of [0, 7, 11, 12, 27, 31, 127, 0x2028, 0x2029]) {
-    assert.equal(sanitize(`x${String.fromCharCode(code)}y`).includes(String.fromCharCode(code)), false)
+
+  for (const [name, code] of CONTROL_CLASSES) {
+    const character = String.fromCharCode(code)
+    assert.equal(sanitize(`x${character}y`).includes(character), false, `${name} survived sanitize`)
+    assert.equal(sanitize(`x${character}y`), 'x y', `${name} was not replaced by a space`)
+  }
+})
+
+test('a C1 line break cannot forge a line for a consumer that splits on Unicode boundaries', () => {
+  // The LF-only version of this assertion is what let U+0085 ship: the forged
+  // line is invisible to `split('\n')` and plain to `splitlines()`.
+  for (const code of [0x0a, 0x0b, 0x0c, 0x0d, 0x85, 0x2028, 0x2029]) {
+    const forged = `first${String.fromCharCode(code)}ERROR   forged line`
+    assert.equal(sanitize(forged).split(UNICODE_LINE_BREAK).length, 1, `U+${code.toString(16)} forged a line`)
+  }
+})
+
+test('a bidi override cannot reverse what a reader sees', () => {
+  // U+202E makes the text after it display right to left, so `/admin` shows as
+  // `nimda/` and an id shows as something the tool never matched on.
+  const reversed = `report${String.fromCharCode(0x202e)}gpj.exe`
+  assert.equal(sanitize(reversed), 'report gpj.exe')
+  for (const code of [0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069]) {
+    assert.equal(excerpt(`a${String.fromCharCode(code)}b`).includes(String.fromCharCode(code)), false)
   }
 })
 

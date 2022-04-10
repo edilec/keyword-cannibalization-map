@@ -22,14 +22,40 @@ export function byCodeUnit(left, right) {
 
 /**
  * Characters removed before any export value is embedded in a report or map.
+ *
+ * Every class here earned its place by getting through a narrower one:
+ *
+ * - **C0 and DEL.** A newline in a query forges a line in the human report.
+ * - **C1 (U+0080-U+009F).** The class that covered C0 and the Unicode line
+ *   separators let this whole range through. U+0085 (NEL) *is* a line break to
+ *   every consumer that splits on Unicode line boundaries -- Python's
+ *   `splitlines`, most editors, most log viewers -- so a query carrying one
+ *   forges a report line for them while the LF-counting test sees nothing
+ *   wrong. U+009B is an 8-bit CSI and opens a terminal escape sequence.
+ * - **U+2028 and U+2029.** Line and paragraph separators, the same forgery.
+ * - **Bidi controls.** U+202E (right-to-left override) reverses the displayed
+ *   order of everything after it, so a page or a file name carrying one shows
+ *   a reader something other than what the tool matched on; the marks, the
+ *   other embeddings and the isolates do the same thing less completely.
+ *
  * Built from code points rather than written literally, because a literal
  * U+2028 inside a regular expression literal is a syntax error in a module.
  */
+const CONTROL_RANGES = Object.freeze([
+  [0x0000, 0x001f],
+  [0x007f, 0x007f],
+  [0x0080, 0x009f],
+  [0x2028, 0x2029],
+  [0x200e, 0x200f],
+  [0x202a, 0x202e],
+  [0x2066, 0x2069],
+])
+
 const CONTROL = new RegExp(
-  `[${String.fromCharCode(0)}-${String.fromCharCode(8)}` +
-  `${String.fromCharCode(11)}${String.fromCharCode(12)}` +
-  `${String.fromCharCode(14)}-${String.fromCharCode(31)}` +
-  `${String.fromCharCode(127)}${String.fromCharCode(0x2028)}${String.fromCharCode(0x2029)}]`,
+  `[${CONTROL_RANGES.map(([first, last]) =>
+    (first === last
+      ? String.fromCharCode(first)
+      : `${String.fromCharCode(first)}-${String.fromCharCode(last)}`)).join('')}]`,
   'g',
 )
 
@@ -41,7 +67,8 @@ const BOM = String.fromCharCode(0xfeff)
  * Applied to every identifier, path, column name, query and page URL that
  * reaches the report or the map -- not only to evidence excerpts. A tool in
  * this catalog sanitised its evidence field and not its ids, and an id
- * carrying a newline forged extra lines in its human report.
+ * carrying a newline forged extra lines in its human report. A file name is an
+ * identifier this tool does not choose, so the same rule holds for it.
  */
 export function sanitize(value) {
   return String(value).replace(CONTROL, ' ').replace(/\s+/g, ' ').trim()

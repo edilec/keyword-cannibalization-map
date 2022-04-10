@@ -513,6 +513,89 @@ test('every untrusted string reaching output is flattened to one line', async ()
   })
 })
 
+/** Every code point the report contract forbids in any string it emits. */
+const FORBIDDEN_CONTROL_CODES = [
+  0x00, 0x07, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1b, 0x1f, 0x7f,
+  0x80, 0x85, 0x9b, 0x9f, 0x2028, 0x2029,
+  0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069,
+]
+
+/** How a consumer that respects Unicode line boundaries splits the human report. */
+const UNICODE_LINE_BREAK = /\r\n|[\n\r\v\f\u0085\u2028\u2029]/
+
+/** Every string in the report and the map, with the path it was found at. */
+function collectStrings(value, path, into) {
+  if (typeof value === 'string') into.push([path, value])
+  else if (Array.isArray(value)) value.forEach((item, index) => collectStrings(item, `${path}[${index}]`, into))
+  else if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) {
+      collectStrings(key, `${path}.<key>`, into)
+      collectStrings(item, `${path}.${key}`, into)
+    }
+  }
+}
+
+test('a control character is stripped wherever it enters, including through an identifier', async () => {
+  // The narrow version of this test fed the character in through a query and
+  // counted the LFs in the report. Both halves of that were too weak: U+0085 is
+  // a line break that `split('\n')` cannot see, and a file name, a column name
+  // and a segment value are identifiers the tool does not choose -- one of them
+  // carrying a control character forges a line just as well as an excerpt does.
+  const NEL = String.fromCharCode(0x85)
+  const RLO = String.fromCharCode(0x202e)
+  const CSI = String.fromCharCode(0x9b)
+
+  const forgedSegment = `US${NEL}ERROR   ./forged forged-rule A line that is not a finding`
+  const forgedName = `we${NEL}ird${RLO}.csv`
+  const rows = [
+    HEADER,
+    `"q${CSI}a","/one${RLO}","${forgedSegment}",en-US,600,10,3.0`,
+    `"q${CSI}a","/two","${forgedSegment}",en-US,400,10,4.0`,
+    '',
+  ].join('\n')
+  // A column name is an identifier too: it reaches the evidence of the finding
+  // that says which column the header was missing.
+  const badHeader = `query,page,region${NEL}x,locale,impressions,clicks\nq,/a,US,en-US,100,4\n`
+
+  await withRoot({ 'e.csv': rows, 'hdr.csv': badHeader, [forgedName]: '  ' }, async (root) => {
+    const { report, map } = await mapQueryPageExports({ root })
+
+    // Non-vacuous: each identifier path above must actually have produced a finding.
+    assert.ok(
+      report.findings.some(
+        (finding) => finding.ruleId === 'header-missing' &&
+          finding.location.file.includes('ird') &&
+          finding.location.file.endsWith('.csv'),
+      ),
+      'the awkwardly named file must produce a finding that carries its name',
+    )
+    assert.ok(
+      report.findings.some((finding) => finding.ruleId === 'header-column-missing' && finding.evidence.includes('region')),
+      'the awkward column name must reach a finding as evidence',
+    )
+    assert.ok(map.candidates.length > 0, 'the forged segment value must still form a candidate')
+
+    const strings = []
+    collectStrings({ report, map }, '$', strings)
+    assert.ok(strings.length > 100, 'the fixture must produce a substantial report to scan')
+    for (const [where, value] of strings) {
+      for (const code of FORBIDDEN_CONTROL_CODES) {
+        assert.equal(
+          value.includes(String.fromCharCode(code)),
+          false,
+          `U+${code.toString(16).padStart(4, '0')} reached ${where}: ${JSON.stringify(value)}`,
+        )
+      }
+    }
+
+    // The end-to-end property, measured the way a reader's tooling measures it:
+    // one line per finding plus the three summary lines, splitting on every
+    // Unicode line boundary rather than on LF alone.
+    const lines = formatReport(report).trimEnd().split(UNICODE_LINE_BREAK)
+    assert.equal(lines.length, report.findings.length + 3)
+  })
+})
+
 test('a duplicate row is reported only when the query, page and segment truly repeat', async () => {
   // The separator-collision case: "a|b" on page "c" and "a" on page "b|c" are
   // two different rows, and a joined key would call them one.

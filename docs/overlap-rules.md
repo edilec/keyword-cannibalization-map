@@ -106,6 +106,24 @@ the segments do share one intent, and can re-run with a narrower segment set.
 | `too-many-rows` | error | An export exceeds `maxRows`; none of its rows were used. |
 | `unterminated-quoted-field` | error | A quoted field is never closed, so the row structure is not trustworthy. |
 
+## Untrusted text in the report
+
+An export is untrusted input, and so is the name of the file it arrived in.
+Every string that reaches the report or the map -- rule evidence, but equally
+file names, column names, segment values, page URLs and queries -- is flattened
+to one line before it is embedded. The characters removed are:
+
+| Class | Code points | Why |
+| --- | --- | --- |
+| C0 and DEL | U+0000-U+001F, U+007F | a newline in a value forges a line in the human report |
+| C1 | U+0080-U+009F | U+0085 (NEL) is a line break to anything that splits on Unicode line boundaries; U+009B is an 8-bit CSI |
+| Line and paragraph separators | U+2028, U+2029 | the same forgery |
+| Bidi controls | U+200E, U+200F, U+202A-U+202E, U+2066-U+2069 | U+202E reverses displayed text, so a reader sees something other than what the tool matched |
+
+Each is replaced by a space, runs of whitespace are collapsed and the result is
+trimmed, so the human report holds exactly one line per finding plus its three
+summary lines however the consumer splits lines.
+
 ## Thresholds
 
 | Threshold | Flag | Default | Constraint |
