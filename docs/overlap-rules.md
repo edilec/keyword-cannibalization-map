@@ -94,7 +94,7 @@ the segments do share one intent, and can re-run with a narrower segment set.
 | `no-rows-parsed` | warning | No row was used at all, so the run grouped nothing. Always accompanied by `status: "incomplete"`. |
 | `page-missing` | error | A row has no page; it cannot support a candidate. |
 | `page-spelling-variant` | warning | A candidate counts page values that differ only in trailing slash, scheme or fragment. |
-| `path-escapes-root` | error | An entry resolves outside the real export root and was refused unread. |
+| `path-escapes-root` | error | An entry resolves outside the real export root and was refused unread. The run is incomplete: the root declared an export this run does not have. |
 | `position-invalid` | warning | Average position is not a non-negative number. The row is kept with an unknown position. |
 | `query-missing` | error | A row has no query; it cannot belong to an intent. |
 | `row-column-count-mismatch` | error | A row has a different field count from the header; the row was not used. |

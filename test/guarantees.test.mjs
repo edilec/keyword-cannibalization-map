@@ -66,6 +66,12 @@ test('every path that could not obtain evidence reports incomplete', async (t) =
       ruleId: 'export-unreadable',
     },
     {
+      name: 'an entry that resolves outside the export root',
+      files: { 'a-good.csv': SMALL_GOOD },
+      prepare: async (root) => symlink(join(CLEAN_ROOT, 'search-console-2026-02-us.csv'), join(root, 'escape.csv')),
+      ruleId: 'path-escapes-root',
+    },
+    {
       name: 'an export that cannot be opened',
       files: { 'a-good.csv': SMALL_GOOD, 'locked.csv': SMALL_GOOD },
       prepare: async (root) => chmod(join(root, 'locked.csv'), 0o000),

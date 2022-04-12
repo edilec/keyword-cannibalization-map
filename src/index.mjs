@@ -551,6 +551,13 @@ async function collectExportFiles(rootReal, limits, collector) {
 
       // Containment is decided on the real path, before the entry is opened or
       // walked. Neither its content nor its location leaves this function.
+      //
+      // The run is incomplete, like every other refusal here. An entry named
+      // inside the root that was refused unread is evidence this run does not
+      // have, whatever the severity table says about the rule: leaving the flag
+      // off made a frozen severity the only thing standing between a refused
+      // entry and a `pass`, and it put a refusal that the exit-code table routes
+      // to 2 -- evidence that is missing -- on exit 1.
       if (!isInside(rootReal, realPath)) {
         record(collector, {
           file: childRelative,
@@ -558,6 +565,7 @@ async function collectExportFiles(rootReal, limits, collector) {
           message: 'Entry resolves outside the export root and was refused; its content was never read.',
           suggestion: 'Move the export inside the root, or map the other location separately.',
         })
+        collector.incomplete = true
         continue
       }
       if (visited.has(realPath)) continue
