@@ -118,17 +118,24 @@ this tool **cannot** conclude:
   fragments are reported as spelling variants, never merged.
 - **Whether the segment boundary is right.** It separates the segments it is
   given; an export with no regional column cannot be split by region.
-- **Anything about rows it did not read.** Bounded-out files, undecodable
-  exports and invalid rows contribute nothing, and the run reports `incomplete`
-  rather than a result it does not have.
+- **Anything about rows it did not read.** Bounded-out files and undecodable
+  exports contribute nothing, and the run reports `incomplete` rather than a
+  result it does not have. A row that *was* read and found internally
+  inconsistent is the other case: that evidence is in hand, the row is dropped
+  from the grouping, and the run is a `fail`.
 - **Anything from outside the export set.** There are no network calls, no
   telemetry and no provider lookups. Live ranking and index state are not
   consulted.
 
 Every limit is explicit and enforced: `maxExports`, `maxExportBytes`, `maxRows`,
-`maxFieldChars`, `maxDepth`, `maxIntentGroups`, `maxClusterRows`, and a 65536
-byte bound on the configuration file. Exceeding one produces a finding naming it
-and an `incomplete` report — never a silent truncation.
+`maxFieldChars`, `maxDepth`, `maxIntentGroups`, `maxClusterRows`. Exceeding one
+produces a finding naming it and an `incomplete` report — never a silent
+truncation.
+
+The configuration file is bounded separately, at 65536 bytes, and that bound is
+checked before the file is opened. Exceeding it is a usage error — exit 2, empty
+stdout, the reason on `stderr` — rather than an `incomplete` report, because no
+export has been looked at when it is decided.
 
 ## Verification
 

@@ -7,6 +7,8 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
+import { MAX_CONFIG_BYTES } from '../src/index.mjs'
+
 const run = promisify(execFile)
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const CLI = join(projectDirectory, 'bin/keyword-cannibalization-map.mjs')
@@ -250,6 +252,33 @@ test('an unusable configuration file exits 2 with an empty stdout', async () => 
     const missing = await cli(['--root', CLEAN_ROOT, '--config', join(directory, 'absent.json')])
     assert.equal(missing.code, 2)
     assert.equal(missing.stdout, '')
+  })
+})
+
+test('the configuration bound is a usage error, not a finding in an incomplete report', async () => {
+  await withTemporary(async (directory) => {
+    // Padded with spaces, so the file is valid JSON at either size and only the
+    // bound can decide. The README used to promise a finding and an incomplete
+    // report here; there is no report, because no export has been looked at.
+    const body = '{"thresholds":{"minPages":3}'
+    const over = join(directory, 'over.json')
+    await writeFile(over, `${body}${' '.repeat(MAX_CONFIG_BYTES)}}`, 'utf8')
+
+    const refused = await cli(['--root', CLEAN_ROOT, '--json', '--config', over])
+    assert.equal(refused.code, 2)
+    assert.equal(refused.stdout, '', 'a configuration error puts no report on stdout')
+    assert.ok(refused.stderr.includes('byte limit'), refused.stderr)
+
+    // Exactly at the bound is accepted and honoured, so what was refused above
+    // was the size and not the padding.
+    const exact = join(directory, 'exact.json')
+    await writeFile(exact, `${body}${' '.repeat(MAX_CONFIG_BYTES - body.length - 1)}}`, 'utf8')
+
+    const accepted = await cli(['--root', CLEAN_ROOT, '--json', '--config', exact])
+    assert.equal(accepted.code, 0)
+    const report = JSON.parse(accepted.stdout)
+    assert.equal(report.status, 'pass')
+    assert.equal(report.summary.candidates, 0, 'minPages 3 from the configuration file must have been used')
   })
 })
 

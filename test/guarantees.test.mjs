@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { MAP_NOTES, mapQueryPageExports } from '../src/index.mjs'
+import { DEFAULT_LIMITS, MAP_NOTES, MAX_CONFIG_BYTES, mapQueryPageExports } from '../src/index.mjs'
 
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const CLEAN_ROOT = join(projectDirectory, 'examples/exports-clean')
@@ -391,17 +391,99 @@ test('a query that resolves out of the root never reaches the output', async () 
   }
 })
 
-test('the README states the guarantee it is judged on', async () => {
+/** The body of one Markdown section, up to the next heading of the same level. */
+function markdownSection(text, heading) {
+  const start = text.indexOf(`${heading}\n`)
+  assert.notEqual(start, -1, `${heading} is missing`)
+  const rest = text.slice(start + heading.length)
+  const next = rest.indexOf('\n## ')
+  return next === -1 ? rest : rest.slice(0, next)
+}
+
+/** The seven things the tool refuses to conclude, each judged on the README's own wording. */
+const README_NON_GOALS = [
+  'Whether an overlap matters',
+  'Whether consolidating a candidate would help',
+  'What a query means',
+  'Whether two page values are one page',
+  'Whether the segment boundary is right',
+  'Anything about rows it did not read',
+  'Anything from outside the export set',
+]
+
+const DOCS_NON_GOALS = [
+  'Whether an overlap matters',
+  'Whether consolidating a candidate would change anything',
+  'What a query means',
+  'Whether two page values are one page',
+  'Whether a segment boundary is the right one',
+  'Anything about rows it did not read',
+  'Anything from outside the export set',
+]
+
+test('the README states the guarantee it is judged on, inside the section that carries it', async () => {
+  // `readme.includes('cannot')` was the whole of this check, and the word
+  // appears in the "A candidate is not a defect" section too -- so the entire
+  // body of the limits section, all seven non-goals, could be replaced by one
+  // line with the suite green. Every claim is now read out of the section it
+  // belongs to, and every limit the code enforces has to be named there.
   const readme = await readFile(resolve(projectDirectory, 'README.md'), 'utf8')
-  assert.ok(readme.includes('## Limits and non-goals'), 'the README must carry a limits section')
   assert.ok(readme.includes('A candidate is not a defect'))
   assert.ok(readme.includes('never fail a run'))
-  assert.ok(readme.includes('no network calls'))
-  assert.ok(readme.includes('cannot'), 'the limits section must say what the tool cannot conclude')
+
+  const limits = markdownSection(readme, '## Limits and non-goals')
+  assert.ok(limits.includes('cannot'), 'the limits section must say what the tool cannot conclude')
+  assert.ok(limits.includes('no network calls'), 'the limits section must rule out network access')
+  for (const claim of README_NON_GOALS) {
+    assert.ok(limits.includes(claim), `the limits section no longer says what it cannot conclude: ${claim}`)
+  }
+  for (const limit of Object.keys(DEFAULT_LIMITS)) {
+    assert.ok(limits.includes(limit), `${limit} is enforced but the limits section does not name it`)
+  }
+  assert.ok(limits.includes(String(MAX_CONFIG_BYTES)), 'the configuration bound must be named with its value')
 
   const docs = await readFile(resolve(projectDirectory, 'docs/overlap-rules.md'), 'utf8')
-  assert.ok(docs.includes('## What this tool cannot conclude'))
-  assert.ok(docs.includes('Whether an overlap matters'))
+  const cannot = markdownSection(docs, '## What this tool cannot conclude')
+  for (const claim of DOCS_NON_GOALS) {
+    assert.ok(cannot.includes(claim), `the rule catalog no longer says what it cannot conclude: ${claim}`)
+  }
+})
+
+test('a row found wrong is a fail; a row this run never obtained is incomplete', async () => {
+  // The README promised `incomplete` for both, and they are different answers:
+  // one is evidence in hand that contradicts itself, the other is evidence the
+  // run does not have. The code was right and the sentence was not.
+  const inconsistent = [
+    HEADER,
+    'q a,/one,US,en-US,600,10,3.0',
+    'q a,/two,US,en-US,400,10,4.0',
+    'q b,/three,US,en-US,10,99,3.0',
+    '',
+  ].join('\n')
+
+  await withRoot({ 'e.csv': inconsistent }, async (root) => {
+    const { report, map } = await mapQueryPageExports({ root })
+    assert.ok(ruleIds(report).includes('metrics-inconsistent'))
+    assert.equal(report.status, 'fail')
+    assert.equal(map.complete, true, 'the run read everything it was given')
+    assert.equal(report.summary.rows, 2, 'the contradictory row is dropped from the grouping')
+  })
+
+  const bounded = [
+    HEADER,
+    'q a,/one,US,en-US,600,10,3.0',
+    'q a,/two,US,en-US,400,10,4.0',
+    'a very long query indeed,/three,US,en-US,100,4,3.0',
+    '',
+  ].join('\n')
+
+  await withRoot({ 'e.csv': bounded }, async (root) => {
+    const { report, map } = await mapQueryPageExports({ root, limits: { maxFieldChars: 12 } })
+    assert.ok(ruleIds(report).includes('row-field-too-long'))
+    assert.equal(report.status, 'incomplete')
+    assert.equal(map.complete, false)
+    assert.equal(report.summary.rows, 2)
+  })
 })
 
 test('no fixture in the repository carries a secret or a personal detail', async () => {

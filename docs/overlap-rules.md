@@ -154,8 +154,13 @@ and never a pass.
 | `maxIntentGroups` | `--max-intent-groups` | 5000 |
 | `maxClusterRows` | `--max-cluster-rows` | 200 |
 
-`maxRows` counts records per export including the header. The configuration file
-is separately bounded at 65536 bytes before it is read.
+`maxRows` counts records per export including the header.
+
+The configuration file is bounded separately, at 65536 bytes, checked before the
+file is opened. That bound is not one of the limits above and does not behave
+like them: it is settled before any export is looked at, so exceeding it is a
+usage error — exit 2 with an empty stdout and the reason on `stderr` — and not a
+finding in an `incomplete` report.
 
 There is deliberately **no wall-clock timeout**. Every phase is bounded by the
 counts above and by nothing else: there is no network call, no subprocess and no
@@ -217,10 +222,11 @@ stdout.
 - **Whether a segment boundary is the right one.** The tool separates the
   segments it was given. If your export has no regional column, it cannot tell
   a UK row from a US one.
-- **Anything about rows it did not read.** An export that was not decoded,
-  a file bounded out by a limit, or a row that failed validation contributes
-  nothing, and the run says `incomplete` rather than reporting a result it does
-  not have.
+- **Anything about rows it did not read.** An export that was not decoded or
+  a file bounded out by a limit contributes nothing, and the run says
+  `incomplete` rather than reporting a result it does not have. A row that was
+  read and failed validation is not in that class: the run holds that evidence,
+  the row is dropped from the grouping, and the status is `fail`.
 - **Anything from outside the export set.** There are no network calls. Ranking
   data, index coverage and live SERP state are not consulted, and a claim that
   would need them is not made.
