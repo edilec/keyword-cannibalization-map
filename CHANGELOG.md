@@ -23,6 +23,32 @@ breaking change and is recorded here.
 - Cross-segment reporting: intents that pooling the segments would have merged
   are reported at `info` severity rather than merged.
 
+### Fixed
+
+- Exports are no longer skipped for the name they have. A dot-prefixed export,
+  and any export under a directory called `node_modules`, was dropped before it
+  was opened: not decoded, not counted in `exportsFound` and not reported, so a
+  run that read one of three exports still said `pass`.
+- Sanitising now covers the C1 range (U+0080-U+009F), including U+0085 (NEL),
+  and the bidi controls (U+200E, U+200F, U+202A-U+202E, U+2066-U+2069) alongside
+  C0, DEL and U+2028/U+2029. A NEL in any value -- a query, a page, a segment
+  value, a column name or a file name -- forged a line in the human report for
+  every consumer that splits on Unicode line boundaries.
+- An entry that resolves outside the export root now sets the run `incomplete`,
+  like every other refusal. `path-escapes-root` was the only refusal that left
+  the run complete, so a single re-grade of that rule turned a run that refused
+  to read its exports into a `pass`, and it reported on exit 1 where the exit
+  table routes missing evidence to 2.
+
+### Documentation
+
+- The configuration-file bound is described as what it is: a usage error with
+  an empty stdout, settled before any export is read, rather than a finding in
+  an `incomplete` report.
+- An invalid row is described as a `fail` -- evidence the run holds and found
+  contradictory -- and separated from evidence the run could not obtain, which
+  is what `incomplete` means.
+
 ### Notes
 
 - A candidate is an item for review, not a defect. Overlap is reported at `info`
