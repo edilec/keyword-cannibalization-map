@@ -36,6 +36,7 @@ import {
   normalizeColumnName,
   parseCount,
   parseDelimited,
+  parseFailureDetail,
   parsePosition,
   sanitize,
   stripBom,
@@ -357,7 +358,7 @@ export async function loadConfigFile(path) {
   try {
     parsed = JSON.parse(stripBom(decoded.text))
   } catch (error) {
-    throw new TypeError(`Configuration file is not valid JSON: ${excerpt(error.message, 120)}`)
+    throw new TypeError(`Configuration file is not valid JSON: ${excerpt(parseFailureDetail(error), 120)}`)
   }
   if (!isRecord(parsed)) throw new TypeError('Configuration file must contain a JSON object')
   for (const key of Object.keys(parsed)) {
@@ -1211,6 +1212,7 @@ export {
   decodeUtf8,
   excerpt,
   parseDelimited,
+  parseFailureDetail,
   sanitize,
 } from './csv.mjs'
 export {

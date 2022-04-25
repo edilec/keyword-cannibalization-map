@@ -7,7 +7,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
-import { MAX_CONFIG_BYTES } from '../src/index.mjs'
+import { MAX_CONFIG_BYTES, parseFailureDetail } from '../src/index.mjs'
 
 const run = promisify(execFile)
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -312,4 +312,84 @@ test('a limit named on the command line is actually enforced by the binary', asy
     assert.equal(report.status, 'incomplete')
     assert.ok(report.findings.some((finding) => finding.ruleId === 'too-many-rows'))
   })
+})
+
+/**
+ * A configuration file that fails to parse must not be quoted back.
+ *
+ * V8 reports a parse failure two ways and one of them embeds the input:
+ * `Unexpected token 'A', "AKIAIOSFODNN7EXAMPLE" is not valid JSON`, or a
+ * ten-character prefix followed by `"..."`. Excerpting does not remove it --
+ * the quoted copy carries no control characters and sits at the front, well
+ * inside the 120-character limit -- so a config file short enough to be only a
+ * credential was printed in full on stderr. The canary is a published AWS
+ * documentation placeholder, not a live key.
+ */
+const CANARY = 'AKIAIOSFODNN7EXAMPLE'
+
+/** Every prefix down to eight characters, which is below V8's truncation at ten. */
+function assertNoCanary(result) {
+  for (const [name, stream] of [['stdout', result.stdout], ['stderr', result.stderr]]) {
+    for (let length = CANARY.length; length >= 8; length -= 1) {
+      assert.equal(
+        stream.includes(CANARY.slice(0, length)),
+        false,
+        `${name} echoed the first ${length} characters of the unparseable configuration file`,
+      )
+    }
+  }
+}
+
+test('an unparseable configuration file is diagnosed without echoing its contents', async () => {
+  await withTemporary(async (directory) => {
+    const config = join(directory, 'config.json')
+    await writeFile(config, CANARY, 'utf8')
+
+    const result = await cli(['--root', CLEAN_ROOT, '--json', '--config', config])
+
+    assert.equal(result.code, 2)
+    assertNoCanary(result)
+    assert.equal(
+      result.stderr,
+      "--config is not usable: Configuration file is not valid JSON: unexpected token 'A' in the document\n",
+    )
+  })
+})
+
+test('a truncated configuration file still reports where parsing stopped', async () => {
+  await withTemporary(async (directory) => {
+    const config = join(directory, 'config.json')
+    await writeFile(config, `{"token": "${CANARY}", `, 'utf8')
+
+    const result = await cli(['--root', CLEAN_ROOT, '--json', '--config', config])
+
+    assert.equal(result.code, 2)
+    assertNoCanary(result)
+    assert.match(result.stderr, /at position \d+ \(line \d+ column \d+\)\n$/)
+  })
+})
+
+test('parseFailureDetail keeps the position and drops the quoted document', () => {
+  const capture = (source) => {
+    try {
+      JSON.parse(source)
+      return null
+    } catch (error) {
+      return error
+    }
+  }
+
+  const quoting = capture(CANARY)
+  assert.equal(quoting.message.includes(CANARY), true, 'V8 no longer quotes the input; this guard needs revisiting')
+  assert.equal(parseFailureDetail(quoting), "unexpected token 'A' in the document")
+
+  // A longer document is quoted as a ten-character prefix, which a check for
+  // the whole string would miss entirely.
+  const truncated = capture('password=hunter2-correct-horse')
+  assert.equal(truncated.message.includes('password=h'), true)
+  assert.equal(parseFailureDetail(truncated), "unexpected token 'p' in the document")
+
+  assert.match(parseFailureDetail(capture('{"a": 1, ')), /at position \d+ \(line \d+ column \d+\)$/)
+  assert.equal(parseFailureDetail(capture('')), 'Unexpected end of JSON input')
+  assert.equal(parseFailureDetail(new Error('unrecognised shape')), 'the document could not be parsed as JSON')
 })

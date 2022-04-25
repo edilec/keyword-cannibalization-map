@@ -34,6 +34,13 @@ breaking change and is recorded here.
   C0, DEL and U+2028/U+2029. A NEL in any value -- a query, a page, a segment
   value, a column name or a file name -- forged a line in the human report for
   every consumer that splits on Unicode line boundaries.
+- A configuration file that fails to parse is no longer quoted back on stderr.
+  V8 embeds the input in one of its two parse-error shapes (`Unexpected token
+  'A', "AKIA..." is not valid JSON`), and excerpting did not remove it: the
+  quoted copy carries no control characters and sits at the front of the
+  message, well inside the 120-character limit. A file short enough to be only
+  a credential was therefore printed in full. `parseFailureDetail` keeps the
+  position, line and column and drops the quoted document.
 - An entry that resolves outside the export root now sets the run `incomplete`,
   like every other refusal. `path-escapes-root` was the only refusal that left
   the run complete, so a single re-grade of that rule turned a run that refused

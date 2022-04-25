@@ -184,6 +184,12 @@ ignored: a typo that silently defaults is the same defect as an ignored limit.
 Command-line options override the configuration file key by key, so
 `--min-pages 3` beside a file that sets `minImpressions` keeps both.
 
+A file that does not parse is named by position, line and column and is never
+quoted back: `Configuration file is not valid JSON: Expected double-quoted
+property name in JSON at position 23 (line 1 column 24)`. V8's own parse error
+embeds the document it choked on, so a configuration file short enough to be
+only a credential would otherwise be reproduced in full on `stderr`.
+
 ## Determinism
 
 Findings sort by `(location.file, line, location.pointer, ruleId, message)`.
