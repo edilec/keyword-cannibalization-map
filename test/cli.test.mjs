@@ -351,7 +351,7 @@ test('an unparseable configuration file is diagnosed without echoing its content
     assertNoCanary(result)
     assert.equal(
       result.stderr,
-      "--config is not usable: Configuration file is not valid JSON: unexpected token 'A' in the document\n",
+      "--config is not usable: Configuration file is not valid JSON: unexpected token 'A' at the start of the document\n",
     )
   })
 })
@@ -381,13 +381,13 @@ test('parseFailureDetail keeps the position and drops the quoted document', () =
 
   const quoting = capture(CANARY)
   assert.equal(quoting.message.includes(CANARY), true, 'V8 no longer quotes the input; this guard needs revisiting')
-  assert.equal(parseFailureDetail(quoting), "unexpected token 'A' in the document")
+  assert.equal(parseFailureDetail(quoting), "unexpected token 'A' at the start of the document")
 
   // A longer document is quoted as a ten-character prefix, which a check for
   // the whole string would miss entirely.
   const truncated = capture('password=hunter2-correct-horse')
   assert.equal(truncated.message.includes('password=h'), true)
-  assert.equal(parseFailureDetail(truncated), "unexpected token 'p' in the document")
+  assert.equal(parseFailureDetail(truncated), "unexpected token 'p' at the start of the document")
 
   assert.match(parseFailureDetail(capture('{"a": 1, ')), /at position \d+ \(line \d+ column \d+\)$/)
   assert.equal(parseFailureDetail(capture('')), 'Unexpected end of JSON input')

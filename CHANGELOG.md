@@ -41,6 +41,15 @@ breaking change and is recorded here.
   message, well inside the 120-character limit. A file short enough to be only
   a credential was therefore printed in full. `parseFailureDetail` keeps the
   position, line and column and drops the quoted document.
+- That first fix was incomplete: it matched the offset BEFORE recognising the
+  quoting shape, so a configuration file whose own text reads `at position 1`
+  produced `Unexpected token 'a', "at position 1" is not valid JSON` and was
+  sliced at the offset found INSIDE the quoted span, handing the file straight
+  back. The quoting shape is now recognised first, and any detail still
+  carrying a double quote is replaced by the generic sentence.
+  `parseFailureDetail` now reports `at the start of the document` or `inside
+  the document` rather than `in the document`, distinguishing a leading snippet
+  from a window V8 took further in.
 - An entry that resolves outside the export root now sets the run `incomplete`,
   like every other refusal. `path-escapes-root` was the only refusal that left
   the run complete, so a single re-grade of that rule turned a run that refused
