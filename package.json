@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "lint": "node --check src/index.mjs && node --check src/csv.mjs && node --check src/cluster.mjs && node --check bin/keyword-cannibalization-map.mjs && node --check test/csv.test.mjs && node --check test/cluster.test.mjs && node --check test/map.test.mjs && node --check test/cli.test.mjs && node --check test/severity-table.test.mjs && node --check test/severity-behaviour.test.mjs && node --check test/determinism.test.mjs && node --check test/guarantees.test.mjs",
+    "lint": "node --check src/index.mjs && node --check src/csv.mjs && node --check src/cluster.mjs && node --check bin/keyword-cannibalization-map.mjs && node --check test/csv.test.mjs && node --check test/cluster.test.mjs && node --check test/map.test.mjs && node --check test/cli.test.mjs && node --check test/severity-table.test.mjs && node --check test/severity-behaviour.test.mjs && node --check test/determinism.test.mjs && node --check test/guarantees.test.mjs && node --check test/parse-failure.test.mjs",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=src/**",
     "example": "node bin/keyword-cannibalization-map.mjs --root examples/exports-clean --map build/cannibalization.map.json",
