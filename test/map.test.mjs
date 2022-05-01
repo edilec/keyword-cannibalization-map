@@ -698,8 +698,11 @@ test('the map destination is refused inside the export root, including through a
     try {
       await assert.rejects(() => resolveMapDestination(root, join(root, 'map.json')), /inside the export root/)
       await assert.rejects(() => resolveMapDestination(root, join(root, 'nested/map.json')), /inside the export root/)
-      await assert.rejects(() => resolveMapDestination(root, root), /inside the export root/)
       await assert.rejects(() => resolveMapDestination(root, ''), /non-empty path/)
+
+      // The root itself is refused for the more specific reason: it is a
+      // directory, which `lstat` sees before containment is even asked about.
+      await assert.rejects(() => resolveMapDestination(root, root), /not a regular file/)
 
       // A symlinked parent is how a "separate destination" becomes a file
       // written into the export set.
@@ -709,7 +712,7 @@ test('the map destination is refused inside the export root, including through a
 
       const allowed = await resolveMapDestination(root, join(outside, 'build/map.json'))
       assert.equal(allowed.endsWith(join('build', 'map.json')), true)
-      await assert.rejects(() => resolveMapDestination(root, outside), /not a file/)
+      await assert.rejects(() => resolveMapDestination(root, outside), /not a regular file/)
     } finally {
       await rm(outside, { recursive: true, force: true })
     }

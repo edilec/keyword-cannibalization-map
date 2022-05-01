@@ -15,7 +15,8 @@ const HELP = `keyword-cannibalization-map
 
 Group query/page exports into candidate overlap clusters, each carrying the
 rows that produced it and a review priority. Nothing is fetched, and no export
-is ever written to.
+is ever written to -- a --map destination that is one of them, by device and
+inode or through a link, is refused before the run reads anything.
 
 A candidate is an item for a person to review, not a defect. Two pages ranking
 for one query is often deliberate, so an overlap never fails a run: the check
@@ -29,7 +30,13 @@ Usage:
 
 Options:
   --root DIR                 Directory holding the query/page exports (required)
-  --map FILE                 Write the derived map here; must be outside --root
+  --map FILE                 Write the derived map here. Refused, as a
+                             configuration error, when it is a symbolic link
+                             (resolving the link is the dangerous act, so it is
+                             refused unresolved), when it resolves inside --root
+                             through a symlinked parent, when it is the same
+                             file as an export by device and inode, or when it
+                             is not a regular file
   --json                     Emit the machine-readable report on stdout
   --config FILE              JSON configuration; CLI options override its values
   --match MODE               exact or tokens (default tokens)
@@ -225,6 +232,7 @@ async function main(argv) {
 
   let report
   let map
+  let inputs
   try {
     const result = await mapQueryPageExports({
       root: options.root,
@@ -238,14 +246,19 @@ async function main(argv) {
     })
     report = result.report
     map = result.map
+    inputs = result.inputs
   } catch (error) {
     process.stderr.write(`${error.message}\n`)
     return 2
   }
 
   if (destination !== null) {
+    // Asked again here, with the exports this run actually opened. The
+    // pre-flight above could not answer "is this destination one of them?":
+    // a hard link shares no path with the file it is a second name for, so only
+    // a device-and-inode comparison against an opened input can see it.
     try {
-      await writeMapFile(destination, map)
+      await writeMapFile(destination, map, { inputs, exportRoot: rootReal })
       process.stderr.write(
         `map written: ${map.counts.candidates} candidate(s), ${map.counts.separatedIntents} separated intent(s), complete=${map.complete}\n`,
       )

@@ -26,7 +26,7 @@
  */
 
 import { readFile, readdir, mkdir, realpath, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, extname, join, resolve, sep } from 'node:path'
+import { dirname, extname, join, resolve } from 'node:path'
 
 import {
   byCodeUnit,
@@ -51,6 +51,7 @@ import {
   normalizeQuery,
   summarizeGroup,
 } from './cluster.mjs'
+import { assertWritableDestination, isInside } from './write-guard.mjs'
 
 export const TOOL_ID = 'keyword-cannibalization-map'
 export const REPORT_SCHEMA_VERSION = '1'
@@ -186,7 +187,6 @@ const ALLOWED_OPTIONS = Object.freeze(['columns', 'limits', 'match', 'root', 'se
 const ALLOWED_CONFIG_KEYS = Object.freeze(['columns', 'limits', 'match', 'segmentColumns', 'thresholds'])
 const MAX_SEGMENT_COLUMNS = 4
 const MAX_COLUMN_NAME_CHARS = 120
-const ANCESTOR_PROBE_LIMIT = 64
 const ROOT_LOCATION = Object.freeze({ file: '.', pointer: '/' })
 
 function isRecord(value) {
@@ -206,11 +206,11 @@ function pad(value) {
  * resolved root against an unresolved target refuses files that are genuinely
  * inside it -- so both sides reaching this function have been through
  * `realpath`.
+ *
+ * Defined once, in `write-guard.mjs`, because the destination guard asks the
+ * same question of the same kind of path and two copies of one predicate drift.
  */
-export function isInside(root, candidate) {
-  if (candidate === root) return true
-  return candidate.startsWith(root.endsWith(sep) ? root : `${root}${sep}`)
-}
+export { isInside } from './write-guard.mjs'
 
 export function validateLimits(overrides = {}) {
   if (!isRecord(overrides)) throw new TypeError('Limits must be an object')
@@ -370,18 +370,16 @@ export async function loadConfigFile(path) {
 }
 
 /**
- * Resolve the map destination and refuse anything inside the export root.
+ * Resolve the map destination, before any export is read.
  *
- * The destination usually does not exist yet, so the nearest existing ancestor
- * is resolved and the remaining segments are appended to it. That still
- * defeats a symlinked parent directory, which is the way a "separate
- * destination" quietly becomes a file written into the export set.
+ * This is the pre-flight: a destination that can never be written to safely
+ * fails here, with no report, rather than after a whole run. It cannot check
+ * everything -- a hard link to an export is an identity this run has not
+ * established yet -- so `writeMapFile` asks again, with the exports it read, at
+ * the moment before the write. `assertWritableDestination` carries the
+ * reasoning for all three holes.
  */
 export async function resolveMapDestination(root, destination) {
-  if (typeof destination !== 'string' || destination.trim() === '') {
-    throw new TypeError('Map destination must be a non-empty path')
-  }
-
   // The root is resolved here rather than trusted from the caller. Comparing a
   // real destination against an unresolved root is the mistake that lets a
   // write land inside the export set, and it is invisible on any system where
@@ -392,37 +390,7 @@ export async function resolveMapDestination(root, destination) {
   } catch (error) {
     throw new TypeError(`Export root could not be resolved: ${error.code ?? 'unknown error'}`)
   }
-
-  const absolute = resolve(destination)
-  const tail = []
-  let probe = absolute
-  let realBase = null
-
-  for (let step = 0; step < ANCESTOR_PROBE_LIMIT; step += 1) {
-    try {
-      realBase = await realpath(probe)
-      break
-    } catch (error) {
-      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') {
-        throw new TypeError(`Map destination could not be resolved: ${error.code ?? 'unknown error'}`)
-      }
-      const parent = dirname(probe)
-      if (parent === probe) throw new TypeError('Map destination has no existing ancestor directory')
-      tail.unshift(basename(probe))
-      probe = parent
-    }
-  }
-  if (realBase === null) throw new TypeError('Map destination is nested too deeply to resolve')
-
-  const resolved = tail.length === 0 ? realBase : join(realBase, ...tail)
-  if (isInside(rootReal, resolved)) {
-    throw new TypeError('Map destination is inside the export root; the map is a derived artifact and must be written elsewhere')
-  }
-  if (tail.length === 0) {
-    const info = await stat(resolved)
-    if (info.isDirectory()) throw new TypeError('Map destination is a directory, not a file')
-  }
-  return resolved
+  return assertWritableDestination(destination, { exportRoot: rootReal, label: 'Map destination' })
 }
 
 function createCollector() {
@@ -606,7 +574,9 @@ async function collectExportFiles(rootReal, limits, collector) {
         return
       }
 
-      files.push({ relativePath: childRelative, realPath, size: info.size })
+      // Device and inode travel with the path, because they are the only thing
+      // that can tell a destination from an export reached by a second name.
+      files.push({ relativePath: childRelative, realPath, size: info.size, dev: info.dev, ino: info.ino })
     }
   }
 
@@ -956,6 +926,11 @@ export async function mapQueryPageExports(options = {}) {
     rows.push(...loaded.rows)
   }
 
+  // The exports this run opened, as the identity a destination is compared
+  // against. A path cannot answer "is this the same file?"; a hard link is a
+  // second name for one inode and shares no path with the first name.
+  const inputs = files.map((entry) => ({ label: entry.relativePath, dev: entry.dev, ino: entry.ino }))
+
   const groups = buildIntentGroups(rows, settings.match)
   let candidates = []
   let separated = []
@@ -1179,14 +1154,29 @@ export async function mapQueryPageExports(options = {}) {
     findings,
   }
 
-  return { report, map }
+  return { report, map, inputs }
 }
 
-/** Serialise the derived map to its own destination. Exports are never touched. */
-export async function writeMapFile(destination, map) {
-  await mkdir(dirname(destination), { recursive: true })
-  await writeFile(destination, `${JSON.stringify(map, null, 2)}\n`, 'utf8')
-  return destination
+/**
+ * Serialise the derived map to its own destination. Exports are never touched.
+ *
+ * The destination is checked again here, immediately before the write and with
+ * the exports this run actually read. The pre-flight in `resolveMapDestination`
+ * could not do this part: a hard link to an export shares no path with it, so
+ * only a device-and-inode comparison against a file the run has opened can see
+ * that the destination *is* that export. `mkdir` runs only after that check,
+ * and only under a parent the guard resolved.
+ */
+export async function writeMapFile(destination, map, options = {}) {
+  const { inputs = [], exportRoot = null } = options
+  const target = await assertWritableDestination(destination, {
+    inputs,
+    exportRoot,
+    label: 'Map destination',
+  })
+  await mkdir(dirname(target), { recursive: true })
+  await writeFile(target, `${JSON.stringify(map, null, 2)}\n`, 'utf8')
+  return target
 }
 
 const SEVERITY_WIDTH = 7
