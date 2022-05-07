@@ -61,9 +61,28 @@ INFO    ./candidates/cluster-0001 cluster-review-candidate Candidate cluster-000
 ```
 
 `--map FILE` writes the derived artifact: every candidate with its pages, its
-share of impressions, its priority band and **the rows it was built from**. The
-destination is refused if it lies inside `--root`; exports are read, never
-written.
+share of impressions, its priority band and **the rows it was built from**.
+Exports are read, never written.
+
+The destination is checked before anything is opened, and one that would write
+somewhere else is refused as a **configuration error**: exit `2`, empty stdout,
+nothing written. Three refusals, none of which catches the other two:
+
+- it is a **symbolic link**. `realpath` on the destination *resolves* the link,
+  and resolving is the dangerous act — here it was also what made the
+  destination look legitimate, since the resolved path landed outside `--root`,
+  which is what this tool requires. `lstat` refuses the link unresolved,
+  including one whose target does not exist yet;
+- it resolves **inside `--root`**. The map is derived from the exports, so a map
+  written among them becomes an input to the next run. A lexical comparison
+  passes for a parent that is a symlink back into the export set, so the parent
+  is resolved and then compared;
+- it is **the same file as an export**. Compared by device and inode, because a
+  hard link is a second name for one file, shares no path with the first name,
+  and a path comparison cannot see it.
+
+The destination's directory is created if it does not exist, but only under an
+ancestor that was resolved and checked first.
 
 ## Regional intent stays separate
 

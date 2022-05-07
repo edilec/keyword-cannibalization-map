@@ -25,6 +25,25 @@ breaking change and is recorded here.
 
 ### Fixed
 
+- **Data loss, twice.** `--map` accepted a symbolic link at the destination and
+  a hard link to an export, and destroyed a file on each. Reproduced before the
+  fix: a symlink pointing at a file in another tree replaced that file with the
+  map, exit `0`, stderr `map written` -- and *resolving* the link is what made
+  the destination look legitimate, because the resolved path was outside the
+  export root, which is exactly what this tool requires. A hard link to one of
+  the exports replaced it too: 513 bytes of CSV became 9239 bytes of JSON on a
+  file the run had just read, exit `0`, stderr `map written`. Both now exit `2`
+  with an empty stdout and leave the file untouched. `lstat` refuses a symbolic
+  link unresolved, including one whose target does not exist yet, and the
+  destination is compared against every export by device and inode, because a
+  hard link shares no path with the file it is a second name for.
+  `test/destination-guard.test.mjs` drives the real binary through one case per
+  hole plus five destinations that must still be **written** -- including a
+  parent directory that does not exist yet and a symlinked parent that stays out
+  of the export root -- because a guard that refuses everything passes every
+  data-loss case while making the tool useless. Each of the three checks was
+  removed in turn and the failures watched.
+
 - Exports are no longer skipped for the name they have. A dot-prefixed export,
   and any export under a directory called `node_modules`, was dropped before it
   was opened: not decoded, not counted in `exportsFound` and not reported, so a
