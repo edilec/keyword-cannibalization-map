@@ -134,11 +134,39 @@ test('--map writes the derived artifact outside the export root', async () => {
   })
 })
 
+/**
+ * The export root here is a temporary copy, not `examples/exports-clean`.
+ *
+ * This case names a destination *inside* the root it passes, so the only thing
+ * standing between it and a file written into the checkout is the guard it
+ * exists to test -- and the way this test is proven to bite is by removing that
+ * guard, which is exactly when the write lands. Against `examples/exports-clean`
+ * it did: the mutation run left an untracked `examples/exports-clean/map.json`
+ * behind. A test must not depend on the code under test to keep the repository
+ * clean.
+ *
+ * The destination is then asserted absent, so the refusal is pinned on what
+ * reached the disk and not only on what reached the streams.
+ */
 test('--map inside the export root is refused with an empty stdout', async () => {
-  const result = await cli(['--root', CLEAN_ROOT, '--map', join(CLEAN_ROOT, 'map.json')])
-  assert.equal(result.code, 2)
-  assert.equal(result.stdout, '')
-  assert.equal(result.stderr.includes('inside the export root'), true)
+  await withTemporary(async (directory) => {
+    await writeFile(
+      join(directory, 'export.csv'),
+      [HEADER, 'solar battery storage,/uk/solar-battery,GB,en-GB,400,20,5.5', ''].join('\n'),
+      'utf8',
+    )
+    const destination = join(directory, 'map.json')
+    const result = await cli(['--root', directory, '--map', destination])
+
+    assert.equal(result.code, 2)
+    assert.equal(result.stdout, '')
+    assert.equal(result.stderr.includes('inside the export root'), true)
+    await assert.rejects(
+      () => readFile(destination, 'utf8'),
+      { code: 'ENOENT' },
+      'a refused destination inside the export root must leave no file behind',
+    )
+  })
 })
 
 test('--no-segments is an assertion the caller makes, and it changes the answer', async () => {
