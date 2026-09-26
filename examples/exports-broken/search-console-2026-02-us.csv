@@ -1,0 +1,9 @@
+query,page,region,locale,impressions,clicks,position
+solar panel installation cost,/guides/solar-installation-cost,US,en-US,1400,90,4.2
+ev charger installation,/services/ev-charger-installation,US,en-US,40,120,2.4
+solar battery storage,/us/solar-battery-storage,US,en-US,"1,200",60,5.5
+heat pump cost,/guides/heat-pump-cost,US,en-US,300
+,/guides/orphan-row,US,en-US,150,4,6.6
+solar inverter sizing,,US,en-US,180,7,7.1
+solar panel installation cost,/blog/solar-pricing-2026,US,en-US,900,40,n/a
+solar panel installation cost,/guides/solar-installation-cost,US,en-US,1400,90,4.2

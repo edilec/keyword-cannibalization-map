@@ -1,0 +1,51 @@
+{
+  "name": "keyword-cannibalization-map",
+  "version": "0.1.0",
+  "description": "Group query/page exports into candidate overlap clusters with their supporting rows and a review priority, keeping regional and locale intent separate.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "lint": "node --check src/index.mjs && node --check src/write-guard.mjs && node --check src/csv.mjs && node --check src/cluster.mjs && node --check bin/keyword-cannibalization-map.mjs && node --check test/csv.test.mjs && node --check test/cluster.test.mjs && node --check test/map.test.mjs && node --check test/cli.test.mjs && node --check test/destination-guard.test.mjs && node --check test/severity-table.test.mjs && node --check test/severity-behaviour.test.mjs && node --check test/determinism.test.mjs && node --check test/guarantees.test.mjs && node --check test/parse-failure.test.mjs",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=src/**",
+    "example": "node bin/keyword-cannibalization-map.mjs --root examples/exports-clean --map build/cannibalization.map.json",
+    "pack:check": "npm pack --dry-run",
+    "check": "npm run lint && npm test && npm run example && npm run pack:check"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/edilec/keyword-cannibalization-map.git"
+  },
+  "bin": {
+    "keyword-cannibalization-map": "./bin/keyword-cannibalization-map.mjs"
+  },
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "examples",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "seo",
+    "search-console",
+    "keyword-overlap",
+    "query-clustering",
+    "content-audit",
+    "csv",
+    "cli"
+  ],
+  "author": "Edilec Private Limited",
+  "bugs": {
+    "url": "https://github.com/edilec/keyword-cannibalization-map/issues"
+  },
+  "homepage": "https://github.com/edilec/keyword-cannibalization-map#readme"
+}
