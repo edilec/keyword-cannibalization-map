@@ -7,7 +7,7 @@ All notable changes to this project are recorded here. The format follows
 Rule ids are part of the public contract. Renaming or re-grading one is a
 breaking change and is recorded here.
 
-## [Unreleased]
+## [0.1.0] - 2026-10-14
 
 ### Added
 
@@ -90,4 +90,4 @@ breaking change and is recorded here.
   severity and never fails a run; `fail` is reserved for export data that is
   internally inconsistent or could not be parsed.
 
-No release has been published.
+GitHub source release v0.1.0 — 2026-10-14.

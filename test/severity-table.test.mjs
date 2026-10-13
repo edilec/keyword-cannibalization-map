@@ -167,8 +167,3 @@ test('the documented configuration surface is the accepted one', async () => {
   }
   assert.equal(text.includes('`fuzzy`'), false, 'the docs name a match mode the tool does not accept')
 })
-
-test('the changelog records that nothing has shipped yet', async () => {
-  const text = await readProjectFile('CHANGELOG.md')
-  assert.equal(text.trimEnd().endsWith('No release has been published.'), true)
-})
